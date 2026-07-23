@@ -1,0 +1,20 @@
+aws_region = "us-east-1"
+
+project_name = "ai-devops-agent"
+environment  = "dev"
+
+# Optional DNS and TLS
+# domain_name         = "app.example.com"
+# acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+ecr_repository_names = ["agent-api", "agent-worker"]
+app_target_port      = 8080
+health_check_path    = "/healthz"
+
+node_instance_types = ["t3.medium"]
+node_desired_size   = 2
+node_min_size       = 1
+node_max_size       = 4
+
+# Set to false in production for HA NAT
+single_nat_gateway = true
