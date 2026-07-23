@@ -12,20 +12,31 @@ variable "vpc_cidr" {
 variable "availability_zones" {
   description = "Availability zones to spread subnets across."
   type        = list(string)
+  default     = []
 }
 
-variable "public_subnet_cidrs" {
-  description = "CIDR blocks for public subnets."
+variable "appgateway_subnet_cidrs" {
+  description = "CIDR blocks for App Gateway / internet-facing ALB subnets."
   type        = list(string)
 }
 
-variable "private_subnet_cidrs" {
-  description = "CIDR blocks for private subnets."
+variable "web_subnet_cidrs" {
+  description = "CIDR blocks for the public web tier subnets."
+  type        = list(string)
+}
+
+variable "app_subnet_cidrs" {
+  description = "CIDR blocks for the private application tier subnets."
   type        = list(string)
 }
 
 variable "database_subnet_cidrs" {
-  description = "CIDR blocks for database subnets."
+  description = "CIDR blocks for the database tier subnets."
+  type        = list(string)
+}
+
+variable "bastion_subnet_cidrs" {
+  description = "CIDR blocks for the bastion / management subnet."
   type        = list(string)
 }
 

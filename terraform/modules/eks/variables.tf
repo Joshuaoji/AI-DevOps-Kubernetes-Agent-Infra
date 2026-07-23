@@ -15,30 +15,64 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Subnet IDs for the EKS control plane and node groups."
+  description = "Subnet IDs for the EKS control plane."
   type        = list(string)
 }
 
-variable "node_instance_types" {
-  description = "EC2 instance types for managed node groups."
+variable "web_subnet_ids" {
+  description = "Subnet IDs for the web tier managed node group."
+  type        = list(string)
+}
+
+variable "app_subnet_ids" {
+  description = "Subnet IDs for the application tier managed node group."
+  type        = list(string)
+}
+
+variable "web_instance_types" {
+  description = "EC2 instance types for the web tier node group."
   type        = list(string)
   default     = ["t3.medium"]
 }
 
-variable "node_desired_size" {
-  description = "Desired number of worker nodes."
+variable "app_instance_types" {
+  description = "EC2 instance types for the application tier node group."
+  type        = list(string)
+  default     = ["t3.medium"]
+}
+
+variable "web_desired_size" {
+  description = "Desired number of web tier nodes."
   type        = number
   default     = 2
 }
 
-variable "node_min_size" {
-  description = "Minimum number of worker nodes."
+variable "web_min_size" {
+  description = "Minimum number of web tier nodes."
   type        = number
   default     = 1
 }
 
-variable "node_max_size" {
-  description = "Maximum number of worker nodes."
+variable "web_max_size" {
+  description = "Maximum number of web tier nodes."
+  type        = number
+  default     = 4
+}
+
+variable "app_desired_size" {
+  description = "Desired number of application tier nodes."
+  type        = number
+  default     = 2
+}
+
+variable "app_min_size" {
+  description = "Minimum number of application tier nodes."
+  type        = number
+  default     = 1
+}
+
+variable "app_max_size" {
+  description = "Maximum number of application tier nodes."
   type        = number
   default     = 4
 }

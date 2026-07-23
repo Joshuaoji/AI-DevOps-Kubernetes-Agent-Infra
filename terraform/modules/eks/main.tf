@@ -28,17 +28,37 @@ module "eks" {
   }
 
   eks_managed_node_groups = {
-    default = {
-      instance_types = var.node_instance_types
-      min_size       = var.node_min_size
-      max_size       = var.node_max_size
-      desired_size   = var.node_desired_size
+    web = {
+      subnet_ids     = var.web_subnet_ids
+      instance_types = var.web_instance_types
+      min_size       = var.web_min_size
+      max_size       = var.web_max_size
+      desired_size   = var.web_desired_size
 
       labels = {
-        role = "general"
+        tier = "web"
       }
 
       tags = merge(var.tags, {
+        Tier                                            = "web"
+        "k8s.io/cluster-autoscaler/enabled"             = "true"
+        "k8s.io/cluster-autoscaler/${var.cluster_name}" = "owned"
+      })
+    }
+
+    app = {
+      subnet_ids     = var.app_subnet_ids
+      instance_types = var.app_instance_types
+      min_size       = var.app_min_size
+      max_size       = var.app_max_size
+      desired_size   = var.app_desired_size
+
+      labels = {
+        tier = "app"
+      }
+
+      tags = merge(var.tags, {
+        Tier                                            = "app"
         "k8s.io/cluster-autoscaler/enabled"             = "true"
         "k8s.io/cluster-autoscaler/${var.cluster_name}" = "owned"
       })
@@ -49,12 +69,12 @@ module "eks" {
 }
 
 resource "aws_eks_addon" "ebs_csi" {
-  cluster_name             = module.eks.cluster_name
-  addon_name               = "aws-ebs-csi-driver"
-  addon_version            = null
+  cluster_name                = module.eks.cluster_name
+  addon_name                  = "aws-ebs-csi-driver"
+  addon_version               = null
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
-  service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
+  service_account_role_arn    = module.ebs_csi_irsa.iam_role_arn
 
   depends_on = [module.ebs_csi_irsa]
 }
@@ -116,32 +136,4 @@ module "aws_load_balancer_controller_irsa" {
   }
 
   tags = var.tags
-}
-
-resource "aws_security_group" "node" {
-  name_prefix = "${var.cluster_name}-node-"
-  description = "Additional security group for EKS worker nodes."
-  vpc_id      = var.vpc_id
-
-  egress {
-    description = "Allow all outbound traffic."
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = merge(var.tags, {
-    Name = "${var.cluster_name}-node-sg"
-  })
-}
-
-resource "aws_security_group_rule" "node_ingress_from_cluster" {
-  description              = "Allow control plane to communicate with nodes."
-  type                     = "ingress"
-  from_port                = 1025
-  to_port                  = 65535
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.node.id
-  source_security_group_id = module.eks.cluster_security_group_id
 }

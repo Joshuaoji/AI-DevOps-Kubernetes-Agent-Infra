@@ -9,8 +9,14 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "Public subnet IDs for the load balancer."
+  description = "Subnet IDs for the load balancer."
   type        = list(string)
+}
+
+variable "internal" {
+  description = "Whether the load balancer is internal."
+  type        = bool
+  default     = false
 }
 
 variable "certificate_arn" {
@@ -20,7 +26,7 @@ variable "certificate_arn" {
 }
 
 variable "target_port" {
-  description = "Port exposed by application pods behind the load balancer."
+  description = "Port exposed by target pods."
   type        = number
   default     = 80
 }
@@ -41,6 +47,12 @@ variable "allowed_ingress_cidr_blocks" {
   description = "CIDR blocks allowed to reach the load balancer."
   type        = list(string)
   default     = ["0.0.0.0/0"]
+}
+
+variable "allowed_ingress_security_group_ids" {
+  description = "Security groups allowed to reach an internal load balancer."
+  type        = list(string)
+  default     = []
 }
 
 variable "tags" {

@@ -18,14 +18,34 @@ output "configure_kubectl" {
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
 
-output "alb_dns_name" {
-  description = "Public DNS name of the application load balancer."
-  value       = module.alb.alb_dns_name
+output "public_alb_dns_name" {
+  description = "Public DNS name of the internet-facing application load balancer."
+  value       = module.public_alb.alb_dns_name
 }
 
-output "alb_target_group_arn" {
-  description = "Target group ARN for registering application pods."
-  value       = module.alb.target_group_arn
+output "internal_alb_dns_name" {
+  description = "DNS name of the internal application load balancer."
+  value       = module.internal_alb.alb_dns_name
+}
+
+output "internal_api_fqdn" {
+  description = "Private DNS FQDN for the application API."
+  value       = "api.${var.private_dns_zone_name}"
+}
+
+output "public_alb_target_group_arn" {
+  description = "Target group ARN for web tier pods."
+  value       = module.public_alb.target_group_arn
+}
+
+output "internal_alb_target_group_arn" {
+  description = "Target group ARN for application tier pods."
+  value       = module.internal_alb.target_group_arn
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAF Web ACL protecting the public ALB."
+  value       = module.waf.web_acl_arn
 }
 
 output "ecr_repository_urls" {
@@ -33,9 +53,15 @@ output "ecr_repository_urls" {
   value       = module.ecr.repository_urls
 }
 
-output "rds_endpoint" {
-  description = "PostgreSQL endpoint."
-  value       = module.rds.endpoint
+output "rds_primary_endpoint" {
+  description = "PostgreSQL primary endpoint."
+  value       = module.rds.primary_endpoint
+  sensitive   = true
+}
+
+output "rds_replica_endpoint" {
+  description = "PostgreSQL read replica endpoint."
+  value       = module.rds.replica_endpoint
   sensitive   = true
 }
 
@@ -44,15 +70,19 @@ output "rds_credentials_secret_arn" {
   value       = module.rds.credentials_secret_arn
 }
 
-output "redis_primary_endpoint" {
-  description = "Redis primary endpoint."
-  value       = module.elasticache.primary_endpoint
-  sensitive   = true
+output "kms_key_arn" {
+  description = "KMS key ARN used for secrets encryption."
+  value       = module.kms.key_arn
 }
 
 output "artifacts_bucket_name" {
   description = "S3 bucket for application artifacts."
   value       = module.s3.artifacts_bucket_name
+}
+
+output "bastion_instance_id" {
+  description = "Session Manager bastion instance ID."
+  value       = module.bastion.bastion_instance_id
 }
 
 output "app_service_account_role_arn" {
@@ -71,6 +101,6 @@ output "cluster_autoscaler_role_arn" {
 }
 
 output "application_url" {
-  description = "Application URL when a Route 53 record is configured."
-  value       = var.domain_name != null ? "https://${var.domain_name}" : "http://${module.alb.alb_dns_name}"
+  description = "Public application URL."
+  value       = var.domain_name != null ? "https://${var.domain_name}" : "http://${module.public_alb.alb_dns_name}"
 }

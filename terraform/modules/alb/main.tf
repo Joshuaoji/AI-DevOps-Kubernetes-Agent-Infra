@@ -3,16 +3,20 @@ resource "aws_security_group" "alb" {
   description = "Security group for ${var.name} application load balancer."
   vpc_id      = var.vpc_id
 
-  ingress {
-    description = "HTTP from the internet."
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = var.allowed_ingress_cidr_blocks
+  dynamic "ingress" {
+    for_each = var.internal ? [] : [1]
+
+    content {
+      description = "HTTP from the internet."
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = var.allowed_ingress_cidr_blocks
+    }
   }
 
   dynamic "ingress" {
-    for_each = var.certificate_arn != null ? [1] : []
+    for_each = var.internal || var.certificate_arn == null ? [] : [1]
 
     content {
       description = "HTTPS from the internet."
@@ -20,6 +24,18 @@ resource "aws_security_group" "alb" {
       to_port     = 443
       protocol    = "tcp"
       cidr_blocks = var.allowed_ingress_cidr_blocks
+    }
+  }
+
+  dynamic "ingress" {
+    for_each = var.internal ? var.allowed_ingress_security_group_ids : []
+
+    content {
+      description              = "HTTP from allowed security groups."
+      from_port                = 80
+      to_port                  = 80
+      protocol                 = "tcp"
+      security_groups          = [ingress.value]
     }
   }
 
@@ -38,7 +54,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_lb" "this" {
   name               = var.name
-  internal           = false
+  internal           = var.internal
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = var.subnet_ids
@@ -86,10 +102,10 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   default_action {
-    type = var.certificate_arn != null ? "redirect" : "forward"
+    type = !var.internal && var.certificate_arn != null ? "redirect" : "forward"
 
     dynamic "redirect" {
-      for_each = var.certificate_arn != null ? [1] : []
+      for_each = !var.internal && var.certificate_arn != null ? [1] : []
 
       content {
         port        = "443"
@@ -99,7 +115,7 @@ resource "aws_lb_listener" "http" {
     }
 
     dynamic "forward" {
-      for_each = var.certificate_arn == null ? [1] : []
+      for_each = var.internal || var.certificate_arn == null ? [1] : []
 
       content {
         target_group {
@@ -111,7 +127,7 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn != null ? 1 : 0
+  count = !var.internal && var.certificate_arn != null ? 1 : 0
 
   load_balancer_arn = aws_lb.this.arn
   port              = 443

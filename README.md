@@ -1,77 +1,85 @@
 # AI DevOps Kubernetes Agent Infrastructure
 
-Terraform implementation of a production-style AWS architecture for running containerized AI/DevOps agent workloads on **Amazon EKS**.
+Terraform implementation of the **Tech Tutorials With Piyush** multi-tier Azure architecture, replicated on AWS with **Amazon EKS** replacing the Docker VMSS compute tiers.
 
-> **Note:** The original architecture diagram was not available in this session. This stack implements a standard three-tier Kubernetes reference architecture commonly used for agent/API platforms. If your diagram differs, share it and the modules can be adjusted.
+## Azure → AWS mapping
+
+| Azure (diagram) | AWS (this repo) |
+|-----------------|-----------------|
+| Resource Group | Tagged project resources |
+| Virtual Network | VPC (`10.0.0.0/16`) |
+| App Gateway Subnet + App Gateway + WAF + Public IP | Dedicated appgateway subnets + internet-facing ALB + **AWS WAF** |
+| Web Tier NSG + Public Subnets + VMSS (Docker) | Security groups + public web subnets + **EKS web node group** |
+| Internal Load Balancers | **Internal ALB** in private app subnets |
+| App Tier NSG + Private Subnets + VMSS (Docker) | Security groups + private app subnets + **EKS app node group** |
+| Private DNS Zone | **Route 53 private hosted zone** (`internal.local`) |
+| DB Tier + PostgreSQL Primary / Read Replica | Database subnets + **RDS PostgreSQL** primary + read replica |
+| Bastion Subnet + Azure Bastion | Bastion subnet + **Session Manager bastion** + SSM VPC endpoints |
+| Key Vault | **KMS** + **Secrets Manager** |
+| Container Registry | **Amazon ECR** |
+| NAT Gateway + Public IP | **NAT Gateway** for private subnet egress |
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    Users[Users / Clients] --> Route53[Route 53]
-    Route53 --> ALB[Application Load Balancer]
-    ALB --> EKS[EKS Cluster]
-    EKS --> ECR[Amazon ECR]
-    EKS --> RDS[(Amazon RDS PostgreSQL)]
-    EKS --> Redis[(ElastiCache Redis)]
-    EKS --> S3[(S3 Artifacts)]
-    EKS --> CW[CloudWatch Logs]
+    Users[Users] --> WAF[AWS WAF]
+    WAF --> PublicALB[Internet-facing ALB]
+    PublicALB --> WebEKS[EKS Web Node Group]
+    WebEKS --> InternalALB[Internal ALB]
+    InternalALB --> AppEKS[EKS App Node Group]
+    AppEKS --> RDSPrimary[(RDS PostgreSQL Primary)]
+    AppEKS --> RDSReplica[(RDS Read Replica)]
+    AppEKS --> ECR[Amazon ECR]
+    AppEKS --> S3[S3 Artifacts]
+    AppEKS --> PrivateDNS[Route 53 Private Zone]
+    Admin[Administrators] --> Bastion[Session Manager Bastion]
+    AppEKS --> NAT[NAT Gateway]
+    NAT --> Internet[Outbound Internet]
 
     subgraph VPC
-        subgraph Public Subnets
-            ALB
-            NAT[NAT Gateway]
+        subgraph AZ1
+            AppGW1[App Gateway Subnet]
+            Web1[Web Subnet]
+            App1[App Subnet]
+            DB1[DB Subnet]
         end
-        subgraph Private Subnets
-            EKS
-        end
-        subgraph Database Subnets
-            RDS
-            Redis
+        subgraph AZ2
+            AppGW2[App Gateway Subnet]
+            Web2[Web Subnet]
+            App2[App Subnet]
+            DB2[DB Subnet]
         end
     end
-
-    EKS --> NAT
-    NAT --> Internet[Internet]
 ```
 
-## Components
-
-| Layer | AWS Service | Purpose |
-|-------|-------------|---------|
-| Network | VPC, IGW, NAT | Isolated networking across 3 AZs |
-| Compute | **EKS + managed node groups** | Kubernetes workloads (agent API/worker) |
-| Ingress | ALB | Public HTTP/HTTPS entry point |
-| Data | RDS PostgreSQL | Persistent relational storage |
-| Cache | ElastiCache Redis | Session/cache layer |
-| Registry | ECR | Container image storage |
-| Storage | S3 | Artifacts, models, ALB access logs |
-| Security | IAM / IRSA, Secrets Manager | Least-privilege pod and DB credentials |
-| DNS | Route 53 (optional) | Custom domain alias to ALB |
-
-## Repository Layout
+## Repository layout
 
 ```
 terraform/
   modules/
-    vpc/           # VPC, subnets, NAT, routing
-    eks/           # EKS cluster, node groups, IRSA roles
-    alb/           # Application Load Balancer
-    rds/           # PostgreSQL + Secrets Manager
-    elasticache/   # Redis replication group
-    ecr/           # Container registries
+    vpc/           # Tiered subnets: appgateway, web, app, db, bastion
+    eks/           # EKS with separate web and app node groups
+    alb/           # Public and internal load balancers
+    waf/           # AWS WAF on the public ALB
+    rds/           # PostgreSQL primary + read replica
+    ecr/           # Container registry
     s3/            # Artifacts and logs buckets
+    kms/           # Encryption key (Key Vault equivalent)
+    bastion/       # Session Manager host + SSM endpoints
+    private-dns/   # Internal service discovery
   environments/
-    dev/           # Dev environment root module
+    dev/           # Ready-to-deploy root module
 kubernetes/
   aws-load-balancer-controller-values.yaml
-  target-group-binding.yaml
+  web-target-group-binding.yaml
+  app-target-group-binding.yaml
 ```
 
 ## Prerequisites
 
 - Terraform >= 1.5
-- AWS CLI configured with permissions to create VPC, EKS, RDS, ElastiCache, ALB, IAM, and S3 resources
+- AWS CLI with permissions for VPC, EKS, RDS, ALB, WAF, IAM, Route 53, KMS, and S3
 - `kubectl` and `helm` for post-deploy Kubernetes setup
 
 ## Deploy
@@ -79,14 +87,12 @@ kubernetes/
 ```bash
 cd terraform/environments/dev
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars for your account/region
-
 terraform init
 terraform plan
 terraform apply
 ```
 
-## Post-Deploy Kubernetes Setup
+## Post-deploy
 
 1. Configure `kubectl`:
 
@@ -94,58 +100,42 @@ terraform apply
 aws eks update-kubeconfig --region <region> --name <cluster-name>
 ```
 
-2. Install the AWS Load Balancer Controller (optional if using the Terraform-managed ALB with TargetGroupBinding):
+2. Create namespaces and deploy web/app workloads with node selectors `tier: web` and `tier: app`.
+
+3. Bind services to the Terraform-created target groups:
 
 ```bash
-helm repo add eks https://aws.github.io/eks-charts
-helm repo update
-
-helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-  -n kube-system \
-  -f ../../kubernetes/aws-load-balancer-controller-values.yaml
+kubectl apply -f ../../kubernetes/web-target-group-binding.yaml
+kubectl apply -f ../../kubernetes/app-target-group-binding.yaml
 ```
 
-3. Bind your service to the Terraform-created target group:
+4. Access the bastion host via Session Manager:
 
 ```bash
-# Replace placeholders in kubernetes/target-group-binding.yaml
-kubectl apply -f ../../kubernetes/target-group-binding.yaml
+aws ssm start-session --target <bastion-instance-id>
 ```
 
-## Key Outputs
+## Key outputs
 
-After `terraform apply`, useful outputs include:
-
+- `public_alb_dns_name` — public entry point (App Gateway equivalent)
+- `internal_api_fqdn` — private DNS name for the app API (`api.internal.local`)
 - `eks_cluster_name` / `configure_kubectl`
-- `alb_dns_name` / `application_url`
 - `ecr_repository_urls`
-- `rds_credentials_secret_arn`
-- `app_service_account_role_arn`
+- `rds_primary_endpoint` / `rds_replica_endpoint`
+- `bastion_instance_id`
 
 ## Customization
 
-Common changes in `terraform/environments/dev/terraform.tfvars`:
+Edit `terraform/environments/dev/terraform.tfvars`:
 
-- `domain_name` + `acm_certificate_arn` for HTTPS and custom DNS
-- `node_instance_types`, `node_desired_size` for compute sizing
+- `domain_name` + `acm_certificate_arn` for HTTPS and custom public DNS
+- `web_*` and `app_*` sizing for each EKS node group
+- `create_read_replica = false` to disable the read replica
 - `single_nat_gateway = false` for HA NAT in production
-- `ecr_repository_names` for additional services
 
-## Assumptions
+## Cost notes
 
-Because the source diagram was unavailable, this implementation assumes:
-
-1. EKS runs in **private subnets**; ALB is in **public subnets**
-2. PostgreSQL and Redis live in **database subnets**
-3. Workloads pull images from **ECR**
-4. Application artifacts are stored in **S3**
-5. Pod IAM permissions use **IRSA**
-
-If your diagram includes additional services (API Gateway, SQS, Bedrock, WAF, etc.), open an issue or share the diagram for extension.
-
-## Cost Notes
-
-This stack creates billable resources including NAT Gateway, EKS control plane, EC2 worker nodes, RDS, and ElastiCache. Use `terraform destroy` in non-production environments when finished.
+This stack creates billable resources including NAT Gateway, EKS control plane, EC2 nodes, RDS, ALB, and WAF. Use `terraform destroy` in non-production environments when finished.
 
 ## License
 

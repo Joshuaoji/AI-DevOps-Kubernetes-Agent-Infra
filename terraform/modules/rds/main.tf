@@ -6,6 +6,7 @@ resource "random_password" "master" {
 resource "aws_secretsmanager_secret" "db_credentials" {
   name_prefix = "${var.name}-db-credentials-"
   description = "Master credentials for ${var.name} RDS instance."
+  kms_key_id  = var.kms_key_arn
 
   tags = var.tags
 }
@@ -14,20 +15,21 @@ resource "aws_secretsmanager_secret_version" "db_credentials" {
   secret_id = aws_secretsmanager_secret.db_credentials.id
 
   secret_string = jsonencode({
-    username = var.master_username
-    password = random_password.master.result
-    engine   = var.engine
-    host     = aws_db_instance.this.address
-    port     = aws_db_instance.this.port
-    dbname   = var.database_name
+    username        = var.master_username
+    password        = random_password.master.result
+    engine          = var.engine
+    host            = aws_db_instance.primary.address
+    port            = aws_db_instance.primary.port
+    dbname          = var.database_name
+    replica_host    = try(aws_db_instance.replica[0].address, null)
   })
 
-  depends_on = [aws_db_instance.this]
+  depends_on = [aws_db_instance.primary]
 }
 
 resource "aws_security_group" "this" {
   name_prefix = "${var.name}-rds-"
-  description = "Security group for ${var.name} RDS instance."
+  description = "Security group for ${var.name} RDS instances."
   vpc_id      = var.vpc_id
 
   tags = merge(var.tags, {
@@ -56,8 +58,8 @@ resource "aws_db_subnet_group" "this" {
   })
 }
 
-resource "aws_db_instance" "this" {
-  identifier = var.name
+resource "aws_db_instance" "primary" {
+  identifier = "${var.name}-primary"
 
   engine         = var.engine
   engine_version = var.engine_version
@@ -80,6 +82,24 @@ resource "aws_db_instance" "this" {
   publicly_accessible     = false
 
   tags = merge(var.tags, {
-    Name = var.name
+    Name = "${var.name}-primary"
+    Role = "primary"
+  })
+}
+
+resource "aws_db_instance" "replica" {
+  count = var.create_read_replica ? 1 : 0
+
+  identifier          = "${var.name}-replica"
+  replicate_source_db = aws_db_instance.primary.identifier
+  instance_class      = coalesce(var.replica_instance_class, var.instance_class)
+
+  vpc_security_group_ids = [aws_security_group.this.id]
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+
+  tags = merge(var.tags, {
+    Name = "${var.name}-replica"
+    Role = "read-replica"
   })
 }

@@ -3,18 +3,34 @@ aws_region = "us-east-1"
 project_name = "ai-devops-agent"
 environment  = "dev"
 
-# Optional DNS and TLS
+# Two-AZ layout matching the reference architecture
+appgateway_subnet_cidrs = ["10.0.0.0/24", "10.0.1.0/24"]
+web_subnet_cidrs        = ["10.0.10.0/24", "10.0.11.0/24"]
+app_subnet_cidrs        = ["10.0.20.0/24", "10.0.21.0/24"]
+database_subnet_cidrs   = ["10.0.30.0/24", "10.0.31.0/24"]
+bastion_subnet_cidrs    = ["10.0.40.0/24"]
+
+private_dns_zone_name = "internal.local"
+
+# Optional public DNS and TLS
 # domain_name         = "app.example.com"
 # acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
-ecr_repository_names = ["agent-api", "agent-worker"]
+ecr_repository_names = ["web-app", "app-api"]
+web_target_port      = 80
 app_target_port      = 8080
-health_check_path    = "/healthz"
+web_health_check_path = "/"
+app_health_check_path = "/healthz"
 
-node_instance_types = ["t3.medium"]
-node_desired_size   = 2
-node_min_size       = 1
-node_max_size       = 4
+web_instance_types = ["t3.medium"]
+app_instance_types = ["t3.medium"]
 
-# Set to false in production for HA NAT
+web_desired_size = 2
+web_min_size     = 1
+web_max_size     = 4
+
+app_desired_size = 2
+app_min_size     = 1
+app_max_size     = 4
+
 single_nat_gateway = true

@@ -23,11 +23,6 @@ output "node_security_group_id" {
   value       = module.eks.node_security_group_id
 }
 
-output "additional_node_security_group_id" {
-  description = "Additional security group attached to worker nodes."
-  value       = aws_security_group.node.id
-}
-
 output "oidc_provider_arn" {
   description = "ARN of the OIDC provider for IRSA."
   value       = module.eks.oidc_provider_arn

@@ -55,9 +55,9 @@ variable "master_username" {
 }
 
 variable "multi_az" {
-  description = "Enable Multi-AZ deployment."
+  description = "Enable Multi-AZ deployment on the primary instance."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "backup_retention_period" {
@@ -70,6 +70,24 @@ variable "deletion_protection" {
   description = "Enable deletion protection."
   type        = bool
   default     = false
+}
+
+variable "create_read_replica" {
+  description = "Create a cross-AZ read replica."
+  type        = bool
+  default     = true
+}
+
+variable "replica_instance_class" {
+  description = "Instance class for the read replica."
+  type        = string
+  default     = null
+}
+
+variable "kms_key_arn" {
+  description = "KMS key ARN for encrypting secrets."
+  type        = string
+  default     = null
 }
 
 variable "tags" {
