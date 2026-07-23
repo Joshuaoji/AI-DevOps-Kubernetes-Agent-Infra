@@ -1,0 +1,21 @@
+frontend:
+  image:
+    repository: ""  # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/web-app
+    tag: "latest"
+  env:
+    - name: BACKEND_API_URL
+      value: "http://api.internal.local"
+  targetGroupBinding:
+    enabled: true
+    targetGroupARN: ""  # terraform output public_alb_target_group_arn
+
+backend:
+  image:
+    repository: ""  # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/app-api
+    tag: "latest"
+  serviceAccount:
+    annotations: {}
+      # eks.amazonaws.com/role-arn: <terraform output app_service_account_role_arn>
+  targetGroupBinding:
+    enabled: true
+    targetGroupARN: ""  # terraform output internal_alb_target_group_arn

@@ -1,0 +1,19 @@
+{{- if .Values.targetGroupBinding.enabled }}
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: {{ include "backend.fullname" . }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "backend.labels" . | nindent 4 }}
+spec:
+  serviceRef:
+    name: {{ include "backend.fullname" . }}
+    port: {{ .Values.service.port }}
+  targetGroupARN: {{ required "targetGroupBinding.targetGroupARN is required when targetGroupBinding.enabled is true" .Values.targetGroupBinding.targetGroupARN }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    matchLabels:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+{{- end }}

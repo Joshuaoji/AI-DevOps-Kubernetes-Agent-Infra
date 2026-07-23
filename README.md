@@ -70,6 +70,10 @@ terraform/
     private-dns/   # Internal service discovery
   environments/
     dev/           # Ready-to-deploy root module
+helm/
+  frontend/        # Frontend microservice chart (web tier)
+  backend/         # Backend API microservice chart (app tier)
+  microservices/   # Umbrella chart to deploy both
 kubernetes/
   aws-load-balancer-controller-values.yaml
   web-target-group-binding.yaml
@@ -100,16 +104,15 @@ terraform apply
 aws eks update-kubeconfig --region <region> --name <cluster-name>
 ```
 
-2. Create namespaces and deploy web/app workloads with node selectors `tier: web` and `tier: app`.
-
-3. Bind services to the Terraform-created target groups:
+2. Deploy the frontend and backend microservices with Helm:
 
 ```bash
-kubectl apply -f ../../kubernetes/web-target-group-binding.yaml
-kubectl apply -f ../../kubernetes/app-target-group-binding.yaml
+# See helm/README.md for full commands
+helm upgrade --install app-api ./helm/backend --namespace app --create-namespace ...
+helm upgrade --install web-app ./helm/frontend --namespace web --create-namespace ...
 ```
 
-4. Access the bastion host via Session Manager:
+3. Access the bastion host via Session Manager:
 
 ```bash
 aws ssm start-session --target <bastion-instance-id>

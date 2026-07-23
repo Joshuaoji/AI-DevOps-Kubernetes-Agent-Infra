@@ -1,0 +1,70 @@
+nameOverride: ""
+fullnameOverride: "web-app"
+namespace: web
+
+image:
+  repository: ""  # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/web-app
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+
+nodeSelector:
+  tier: web
+
+tolerations: []
+affinity: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+env: []
+  # - name: BACKEND_API_URL
+  #   value: "http://api.internal.local"
+
+envFrom: []
+
+targetGroupBinding:
+  enabled: true
+  targetGroupARN: ""  # Set after terraform apply (public_alb_target_group_arn)
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podAnnotations: {}
+podLabels: {}
+
+securityContext: {}
+containerSecurityContext: {}
