@@ -174,6 +174,7 @@ helm/
   frontend/        # Frontend microservice chart (web tier)
   backend/         # Backend API microservice chart (app tier)
   microservices/   # Umbrella chart to deploy both
+karpenter/         # Optional Karpenter autoscaling (not enabled by default)
 kubernetes/
   aws-load-balancer-controller-values.yaml
   web-target-group-binding.yaml

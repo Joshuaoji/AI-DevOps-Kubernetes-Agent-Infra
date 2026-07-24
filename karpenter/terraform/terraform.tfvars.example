@@ -1,0 +1,15 @@
+aws_region   = "us-east-1"
+cluster_name = "ai-devops-agent-dev-eks"
+
+# From the main stack (terraform/environments/dev):
+#   terraform console <<< 'module.vpc.web_subnet_ids'
+#   terraform console <<< 'module.vpc.app_subnet_ids'
+web_subnet_ids = [
+  "subnet-xxxxxxxxxxxxxxxxx",
+  "subnet-xxxxxxxxxxxxxxxxx",
+]
+
+app_subnet_ids = [
+  "subnet-xxxxxxxxxxxxxxxxx",
+  "subnet-xxxxxxxxxxxxxxxxx",
+]
