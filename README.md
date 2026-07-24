@@ -2,6 +2,140 @@
 
 Terraform implementation of the **Tech Tutorials With Piyush** multi-tier Azure architecture, replicated on AWS with **Amazon EKS** replacing the Docker VMSS compute tiers.
 
+## AWS architecture
+
+![AWS infrastructure architecture](./docs/images/aws-architecture.png)
+
+### Request flow
+
+```mermaid
+flowchart LR
+    Users([Users]) --> WAF[AWS WAF]
+    WAF --> PublicALB[Internet-facing ALB]
+    PublicALB --> WebPods[web-app pods<br/>EKS web node group]
+    WebPods --> InternalALB[Internal ALB]
+    InternalALB --> AppPods[app-api pods<br/>EKS app node group]
+    AppPods --> RDSPrimary[(RDS PostgreSQL<br/>Primary)]
+    AppPods --> RDSReplica[(RDS PostgreSQL<br/>Read Replica)]
+    AppPods --> PrivateDNS[Route 53<br/>api.internal.local]
+    AppPods --> ECR[Amazon ECR]
+    AppPods --> S3[S3 Artifacts]
+    AppPods --> Secrets[Secrets Manager<br/>+ KMS]
+    AppPods --> NAT[NAT Gateway]
+    NAT --> Outbound([Outbound Internet])
+    Admin([Administrators]) --> Bastion[Session Manager<br/>Bastion Host]
+```
+
+### VPC topology (2 availability zones)
+
+```mermaid
+flowchart TB
+    subgraph Internet["Internet"]
+        Users([Users])
+        Outbound([Outbound])
+    end
+
+    subgraph AWS["AWS Cloud"]
+        WAF[AWS WAF]
+
+        subgraph VPC["VPC 10.0.0.0/16"]
+            IGW[Internet Gateway]
+            NAT[NAT Gateway]
+
+            subgraph AZ1["Availability Zone 1"]
+                AG1["App Gateway Subnet<br/>10.0.0.0/24"]
+                WEB1["Web Subnet (public)<br/>10.0.10.0/24"]
+                APP1["App Subnet (private)<br/>10.0.20.0/24"]
+                DB1["Database Subnet<br/>10.0.30.0/24"]
+            end
+
+            subgraph AZ2["Availability Zone 2"]
+                AG2["App Gateway Subnet<br/>10.0.1.0/24"]
+                WEB2["Web Subnet (public)<br/>10.0.11.0/24"]
+                APP2["App Subnet (private)<br/>10.0.21.0/24"]
+                DB2["Database Subnet<br/>10.0.31.0/24"]
+            end
+
+            BASTION["Bastion Subnet<br/>10.0.40.0/24"]
+
+            PublicALB[Internet-facing ALB]
+            InternalALB[Internal ALB]
+            EKSWeb[EKS Web Node Group<br/>Helm: web-app]
+            EKSApp[EKS App Node Group<br/>Helm: app-api]
+            RDSPrimary[(RDS Primary)]
+            RDSReplica[(RDS Read Replica)]
+            BastionHost[Session Manager Host]
+            SSM[SSM VPC Endpoints]
+            PrivateDNS[Route 53 Private Zone<br/>internal.local]
+        end
+
+        EKSControl[EKS Control Plane]
+        ECR[Amazon ECR]
+        S3[S3 Buckets]
+        KMS[KMS + Secrets Manager]
+    end
+
+    Users --> WAF
+    WAF --> PublicALB
+    PublicALB --> AG1
+    PublicALB --> AG2
+    PublicALB --> EKSWeb
+    EKSWeb --> WEB1
+    EKSWeb --> WEB2
+    EKSWeb --> InternalALB
+    InternalALB --> APP1
+    InternalALB --> APP2
+    InternalALB --> EKSApp
+    EKSApp --> RDSPrimary
+    EKSApp --> RDSReplica
+    RDSPrimary --> DB1
+    RDSReplica --> DB2
+    EKSApp --> PrivateDNS
+    EKSApp --> NAT
+    NAT --> IGW
+    IGW --> Outbound
+    EKSWeb --> ECR
+    EKSApp --> ECR
+    EKSApp --> S3
+    EKSApp --> KMS
+    Admin([Administrators]) --> BastionHost
+    BastionHost --> BASTION
+    BastionHost --> SSM
+    EKSControl -.-> EKSWeb
+    EKSControl -.-> EKSApp
+```
+
+### Microservices deployment
+
+```mermaid
+flowchart LR
+    subgraph Helm["Helm Charts"]
+        FrontendChart[helm/frontend]
+        BackendChart[helm/backend]
+    end
+
+    subgraph WebNS["Namespace: web"]
+        WebDeploy[Deployment: web-app]
+        WebSvc[Service :80]
+        WebTGB[TargetGroupBinding]
+    end
+
+    subgraph AppNS["Namespace: app"]
+        AppDeploy[Deployment: app-api]
+        AppSvc[Service :8080]
+        AppTGB[TargetGroupBinding]
+        AppSA[ServiceAccount + IRSA]
+    end
+
+    FrontendChart --> WebDeploy
+    BackendChart --> AppDeploy
+    WebTGB --> PublicALB[Public ALB Target Group]
+    AppTGB --> InternalALB[Internal ALB Target Group]
+    WebDeploy --> WebSvc
+    AppDeploy --> AppSvc
+    AppDeploy --> AppSA
+```
+
 ## Azure → AWS mapping
 
 | Azure (diagram) | AWS (this repo) |
@@ -18,40 +152,6 @@ Terraform implementation of the **Tech Tutorials With Piyush** multi-tier Azure 
 | Key Vault | **KMS** + **Secrets Manager** |
 | Container Registry | **Amazon ECR** |
 | NAT Gateway + Public IP | **NAT Gateway** for private subnet egress |
-
-## Architecture
-
-```mermaid
-flowchart TB
-    Users[Users] --> WAF[AWS WAF]
-    WAF --> PublicALB[Internet-facing ALB]
-    PublicALB --> WebEKS[EKS Web Node Group]
-    WebEKS --> InternalALB[Internal ALB]
-    InternalALB --> AppEKS[EKS App Node Group]
-    AppEKS --> RDSPrimary[(RDS PostgreSQL Primary)]
-    AppEKS --> RDSReplica[(RDS Read Replica)]
-    AppEKS --> ECR[Amazon ECR]
-    AppEKS --> S3[S3 Artifacts]
-    AppEKS --> PrivateDNS[Route 53 Private Zone]
-    Admin[Administrators] --> Bastion[Session Manager Bastion]
-    AppEKS --> NAT[NAT Gateway]
-    NAT --> Internet[Outbound Internet]
-
-    subgraph VPC
-        subgraph AZ1
-            AppGW1[App Gateway Subnet]
-            Web1[Web Subnet]
-            App1[App Subnet]
-            DB1[DB Subnet]
-        end
-        subgraph AZ2
-            AppGW2[App Gateway Subnet]
-            Web2[Web Subnet]
-            App2[App Subnet]
-            DB2[DB Subnet]
-        end
-    end
-```
 
 ## Repository layout
 
