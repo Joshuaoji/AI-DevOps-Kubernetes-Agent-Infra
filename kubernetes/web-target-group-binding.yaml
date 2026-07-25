@@ -1,0 +1,13 @@
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: web-app
+  namespace: web
+spec:
+  serviceRef:
+    name: web-app
+    port: 80
+  targetGroupARN: REPLACE_WITH_PUBLIC_ALB_TARGET_GROUP_ARN
+  nodeSelector:
+    matchLabels:
+      tier: web

@@ -1,0 +1,77 @@
+nameOverride: ""
+fullnameOverride: "app-api"
+namespace: app
+
+image:
+  repository: ""  # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com/app-api
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+nodeSelector:
+  tier: app
+
+tolerations: []
+affinity: {}
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 20
+  periodSeconds: 20
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+    # eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/ai-devops-agent-dev-app-...
+
+env:
+  - name: PORT
+    value: "8080"
+
+envFrom: []
+  # - secretRef:
+  #     name: app-api-db-credentials
+
+secrets:
+  create: false
+  data: {}
+
+targetGroupBinding:
+  enabled: true
+  targetGroupARN: ""  # Set after terraform apply (internal_alb_target_group_arn)
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+podAnnotations: {}
+podLabels: {}
+
+securityContext: {}
+containerSecurityContext: {}

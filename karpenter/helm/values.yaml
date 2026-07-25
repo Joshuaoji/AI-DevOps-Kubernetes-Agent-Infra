@@ -1,0 +1,40 @@
+# Karpenter controller Helm values
+# https://karpenter.sh/docs/getting-started/getting-started-with-karpenter/
+
+replicas: 2
+
+settings:
+  # Set at install time:
+  # clusterName: <eks-cluster-name>
+  # interruptionQueue: <sqs-queue-name>
+  featureGates:
+    spotToSpotConsolidation: true
+
+serviceAccount:
+  create: true
+  name: karpenter
+  # annotations set at install time:
+  # eks.amazonaws.com/role-arn: <karpenter_controller_role_arn>
+
+controller:
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+
+logLevel: info
+
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: karpenter.sh/nodepool
+              operator: DoesNotExist

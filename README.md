@@ -1,1 +1,355 @@
-# AI-DevOps-Kubernetes-Agent-Infra
+# AI DevOps Kubernetes Agent Infrastructure
+
+Terraform, Helm, and optional Karpenter for running a 3-tier application on AWS with Amazon EKS.
+
+## Production reference architectures
+
+Two simple, secure patterns for a **3-tier application** (web → app → database) on Kubernetes. Both use **Amazon EKS** for compute and **Amazon RDS PostgreSQL on Graviton (`db.t4g`)** for the database — the most cost-efficient managed relational option for a straightforward production workload.
+
+---
+
+### 1. Public application (internet-facing)
+
+For apps that **anyone on the internet** can access (customer portals, public APIs, SaaS products).
+
+![Public 3-tier production architecture](./docs/images/public-production-architecture.png)
+
+```mermaid
+flowchart TB
+    Users([Internet Users]) --> Route53[Route 53 + ACM]
+    Route53 --> WAF[AWS WAF]
+    WAF --> ALB[Internet-facing ALB<br/>Public subnets]
+    ALB --> EKS[Amazon EKS<br/>Private subnets]
+    EKS --> Web[Web tier pods]
+    EKS --> App[App tier pods]
+    App --> RDS[(RDS PostgreSQL<br/>db.t4g Multi-AZ<br/>Database subnets)]
+    EKS --> ECR[Amazon ECR]
+    EKS --> Secrets[Secrets Manager]
+    EKS --> NAT[NAT Gateway]
+    NAT --> Outbound([Outbound internet<br/>patches / APIs])
+
+    subgraph VPC["VPC — 2 Availability Zones"]
+        ALB
+        EKS
+        RDS
+    end
+```
+
+| Tier | AWS service | Notes |
+|------|-------------|-------|
+| Web | EKS pods + ALB | Frontend served through HTTPS |
+| App | EKS pods | Backend API; not exposed directly to the internet |
+| Database | RDS PostgreSQL (`db.t4g`) | Private subnets only; encrypted at rest |
+
+**Security essentials**
+
+- WAF in front of the ALB (OWASP managed rules)
+- TLS termination at the ALB with ACM
+- EKS nodes and RDS in **private subnets** — no public IPs on workloads
+- Security groups: ALB → EKS → RDS only (least privilege)
+- Secrets in Secrets Manager, not in container images
+- Single NAT Gateway per AZ (or one NAT to reduce cost in smaller deployments)
+
+---
+
+### 2. Internal application (company-only)
+
+For apps that **only employees** should reach (admin dashboards, internal tools, HR systems).
+
+![Internal 3-tier production architecture](./docs/images/internal-production-architecture.png)
+
+```mermaid
+flowchart TB
+    Employees([Company Employees]) --> VPN[AWS Client VPN<br/>or Site-to-Site VPN]
+    VPN --> InternalALB[Internal ALB<br/>Private subnets]
+    InternalALB --> EKS[Amazon EKS<br/>Private cluster endpoint]
+    EKS --> Web[Web tier pods]
+    EKS --> App[App tier pods]
+    App --> RDS[(RDS PostgreSQL<br/>db.t4g Multi-AZ<br/>Database subnets)]
+    EKS --> ECR[Amazon ECR]
+    EKS --> Secrets[Secrets Manager]
+    EKS --> Endpoints[VPC Endpoints<br/>AWS APIs]
+
+    subgraph VPC["VPC — no public ingress"]
+        InternalALB
+        EKS
+        RDS
+    end
+```
+
+| Tier | AWS service | Notes |
+|------|-------------|-------|
+| Web | EKS pods + internal ALB | Reachable only over VPN / corporate network |
+| App | EKS pods | Internal API tier |
+| Database | RDS PostgreSQL (`db.t4g`) | Isolated database subnets |
+
+**Security essentials**
+
+- **No** internet-facing load balancer or WAF — zero public entry point
+- EKS API endpoint private; access via VPN or AWS PrivateLink
+- Internal ALB restricted to corporate CIDR ranges via security groups
+- RDS not publicly accessible; security groups allow only the EKS node SG
+- VPC endpoints for ECR and Secrets Manager to avoid routing AWS API traffic over the public internet
+
+---
+
+### Public vs internal at a glance
+
+| | Public | Internal |
+|---|--------|----------|
+| Who can access | Anyone on the internet | Company members via VPN |
+| Entry point | Route 53 → WAF → public ALB | Client VPN → internal ALB |
+| EKS cluster | Private nodes, public ALB ingress | Private nodes, private API |
+| Database | RDS PostgreSQL `db.t4g` Multi-AZ | RDS PostgreSQL `db.t4g` Multi-AZ |
+| Outbound internet | NAT Gateway | VPC endpoints (preferred) |
+
+---
+
+## Implemented architecture (this repository)
+
+The Terraform in this repo implements an extended version of the **public** pattern (based on a multi-tier Azure reference), with separate web/app node groups, an internal ALB between tiers, and optional Helm/Karpenter add-ons.
+
+![AWS infrastructure architecture](./docs/images/aws-architecture.png)
+
+### Request flow
+
+```mermaid
+flowchart LR
+    Users([Users]) --> WAF[AWS WAF]
+    WAF --> PublicALB[Internet-facing ALB]
+    PublicALB --> WebPods[web-app pods<br/>EKS web node group]
+    WebPods --> InternalALB[Internal ALB]
+    InternalALB --> AppPods[app-api pods<br/>EKS app node group]
+    AppPods --> RDSPrimary[(RDS PostgreSQL<br/>Primary)]
+    AppPods --> RDSReplica[(RDS PostgreSQL<br/>Read Replica)]
+    AppPods --> PrivateDNS[Route 53<br/>api.internal.local]
+    AppPods --> ECR[Amazon ECR]
+    AppPods --> S3[S3 Artifacts]
+    AppPods --> Secrets[Secrets Manager<br/>+ KMS]
+    AppPods --> NAT[NAT Gateway]
+    NAT --> Outbound([Outbound Internet])
+    Admin([Administrators]) --> Bastion[Session Manager<br/>Bastion Host]
+```
+
+### VPC topology (2 availability zones)
+
+```mermaid
+flowchart TB
+    subgraph Internet["Internet"]
+        Users([Users])
+        Outbound([Outbound])
+    end
+
+    subgraph AWS["AWS Cloud"]
+        WAF[AWS WAF]
+
+        subgraph VPC["VPC 10.0.0.0/16"]
+            IGW[Internet Gateway]
+            NAT[NAT Gateway]
+
+            subgraph AZ1["Availability Zone 1"]
+                AG1["App Gateway Subnet<br/>10.0.0.0/24"]
+                WEB1["Web Subnet (public)<br/>10.0.10.0/24"]
+                APP1["App Subnet (private)<br/>10.0.20.0/24"]
+                DB1["Database Subnet<br/>10.0.30.0/24"]
+            end
+
+            subgraph AZ2["Availability Zone 2"]
+                AG2["App Gateway Subnet<br/>10.0.1.0/24"]
+                WEB2["Web Subnet (public)<br/>10.0.11.0/24"]
+                APP2["App Subnet (private)<br/>10.0.21.0/24"]
+                DB2["Database Subnet<br/>10.0.31.0/24"]
+            end
+
+            BASTION["Bastion Subnet<br/>10.0.40.0/24"]
+
+            PublicALB[Internet-facing ALB]
+            InternalALB[Internal ALB]
+            EKSWeb[EKS Web Node Group<br/>Helm: web-app]
+            EKSApp[EKS App Node Group<br/>Helm: app-api]
+            RDSPrimary[(RDS Primary)]
+            RDSReplica[(RDS Read Replica)]
+            BastionHost[Session Manager Host]
+            SSM[SSM VPC Endpoints]
+            PrivateDNS[Route 53 Private Zone<br/>internal.local]
+        end
+
+        EKSControl[EKS Control Plane]
+        ECR[Amazon ECR]
+        S3[S3 Buckets]
+        KMS[KMS + Secrets Manager]
+    end
+
+    Users --> WAF
+    WAF --> PublicALB
+    PublicALB --> AG1
+    PublicALB --> AG2
+    PublicALB --> EKSWeb
+    EKSWeb --> WEB1
+    EKSWeb --> WEB2
+    EKSWeb --> InternalALB
+    InternalALB --> APP1
+    InternalALB --> APP2
+    InternalALB --> EKSApp
+    EKSApp --> RDSPrimary
+    EKSApp --> RDSReplica
+    RDSPrimary --> DB1
+    RDSReplica --> DB2
+    EKSApp --> PrivateDNS
+    EKSApp --> NAT
+    NAT --> IGW
+    IGW --> Outbound
+    EKSWeb --> ECR
+    EKSApp --> ECR
+    EKSApp --> S3
+    EKSApp --> KMS
+    Admin([Administrators]) --> BastionHost
+    BastionHost --> BASTION
+    BastionHost --> SSM
+    EKSControl -.-> EKSWeb
+    EKSControl -.-> EKSApp
+```
+
+### Microservices deployment
+
+```mermaid
+flowchart LR
+    subgraph Helm["Helm Charts"]
+        FrontendChart[helm/frontend]
+        BackendChart[helm/backend]
+    end
+
+    subgraph WebNS["Namespace: web"]
+        WebDeploy[Deployment: web-app]
+        WebSvc[Service :80]
+        WebTGB[TargetGroupBinding]
+    end
+
+    subgraph AppNS["Namespace: app"]
+        AppDeploy[Deployment: app-api]
+        AppSvc[Service :8080]
+        AppTGB[TargetGroupBinding]
+        AppSA[ServiceAccount + IRSA]
+    end
+
+    FrontendChart --> WebDeploy
+    BackendChart --> AppDeploy
+    WebTGB --> PublicALB[Public ALB Target Group]
+    AppTGB --> InternalALB[Internal ALB Target Group]
+    WebDeploy --> WebSvc
+    AppDeploy --> AppSvc
+    AppDeploy --> AppSA
+```
+
+## Azure → AWS mapping
+
+| Azure (diagram) | AWS (this repo) |
+|-----------------|-----------------|
+| Resource Group | Tagged project resources |
+| Virtual Network | VPC (`10.0.0.0/16`) |
+| App Gateway Subnet + App Gateway + WAF + Public IP | Dedicated appgateway subnets + internet-facing ALB + **AWS WAF** |
+| Web Tier NSG + Public Subnets + VMSS (Docker) | Security groups + public web subnets + **EKS web node group** |
+| Internal Load Balancers | **Internal ALB** in private app subnets |
+| App Tier NSG + Private Subnets + VMSS (Docker) | Security groups + private app subnets + **EKS app node group** |
+| Private DNS Zone | **Route 53 private hosted zone** (`internal.local`) |
+| DB Tier + PostgreSQL Primary / Read Replica | Database subnets + **RDS PostgreSQL** primary + read replica |
+| Bastion Subnet + Azure Bastion | Bastion subnet + **Session Manager bastion** + SSM VPC endpoints |
+| Key Vault | **KMS** + **Secrets Manager** |
+| Container Registry | **Amazon ECR** |
+| NAT Gateway + Public IP | **NAT Gateway** for private subnet egress |
+
+## Repository layout
+
+```
+terraform/
+  modules/
+    vpc/           # Tiered subnets: appgateway, web, app, db, bastion
+    eks/           # EKS with separate web and app node groups
+    alb/           # Public and internal load balancers
+    waf/           # AWS WAF on the public ALB
+    rds/           # PostgreSQL primary + read replica
+    ecr/           # Container registry
+    s3/            # Artifacts and logs buckets
+    kms/           # Encryption key (Key Vault equivalent)
+    bastion/       # Session Manager host + SSM endpoints
+    private-dns/   # Internal service discovery
+  environments/
+    dev/           # Ready-to-deploy root module
+helm/
+  frontend/        # Frontend microservice chart (web tier)
+  backend/         # Backend API microservice chart (app tier)
+  microservices/   # Umbrella chart to deploy both
+karpenter/         # Optional Karpenter autoscaling (not enabled by default)
+kubernetes/
+  aws-load-balancer-controller-values.yaml
+  web-target-group-binding.yaml
+  app-target-group-binding.yaml
+```
+
+## Prerequisites
+
+- Terraform >= 1.5
+- AWS CLI with permissions for VPC, EKS, RDS, ALB, WAF, IAM, Route 53, KMS, and S3
+- `kubectl` and `helm` for post-deploy Kubernetes setup
+
+## Deploy
+
+```bash
+cd terraform/environments/dev
+cp terraform.tfvars.example terraform.tfvars
+terraform init
+terraform plan
+terraform apply
+```
+
+## Post-deploy
+
+1. Configure `kubectl`:
+
+```bash
+aws eks update-kubeconfig --region <region> --name <cluster-name>
+```
+
+2. Deploy the frontend and backend microservices with Helm:
+
+```bash
+# See helm/README.md for full commands
+helm upgrade --install app-api ./helm/backend --namespace app --create-namespace ...
+helm upgrade --install web-app ./helm/frontend --namespace web --create-namespace ...
+```
+
+3. Access the bastion host via Session Manager:
+
+```bash
+aws ssm start-session --target <bastion-instance-id>
+```
+
+## Key outputs
+
+- `public_alb_dns_name` — public entry point (App Gateway equivalent)
+- `internal_api_fqdn` — private DNS name for the app API (`api.internal.local`)
+- `eks_cluster_name` / `configure_kubectl`
+- `ecr_repository_urls`
+- `rds_primary_endpoint` / `rds_replica_endpoint`
+- `bastion_instance_id`
+
+## Customization
+
+Edit `terraform/environments/dev/terraform.tfvars`:
+
+- `domain_name` + `acm_certificate_arn` for HTTPS and custom public DNS
+- `web_*` and `app_*` sizing for each EKS node group
+- `create_read_replica = false` to disable the read replica
+- `single_nat_gateway = false` for HA NAT in production
+
+## Cost notes
+
+This stack creates billable resources including NAT Gateway, EKS control plane, EC2 nodes, RDS, ALB, and WAF. Use `terraform destroy` in non-production environments when finished.
+
+## Optional: Karpenter autoscaling
+
+The default stack uses EKS managed node groups and the Cluster Autoscaler. For workload-driven autoscaling with Karpenter, see [`karpenter/README.md`](karpenter/README.md). That folder is fully optional and does not change the default Terraform or Helm deployment.
+
+## License
+
+See [LICENSE](LICENSE).

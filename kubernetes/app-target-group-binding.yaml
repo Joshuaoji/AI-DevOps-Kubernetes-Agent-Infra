@@ -1,0 +1,13 @@
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: app-api
+  namespace: app
+spec:
+  serviceRef:
+    name: app-api
+    port: 8080
+  targetGroupARN: REPLACE_WITH_INTERNAL_ALB_TARGET_GROUP_ARN
+  nodeSelector:
+    matchLabels:
+      tier: app
