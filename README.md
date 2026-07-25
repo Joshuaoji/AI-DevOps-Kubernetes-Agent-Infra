@@ -1,8 +1,113 @@
 # AI DevOps Kubernetes Agent Infrastructure
 
-Terraform implementation of the **Tech Tutorials With Piyush** multi-tier Azure architecture, replicated on AWS with **Amazon EKS** replacing the Docker VMSS compute tiers.
+Terraform, Helm, and optional Karpenter for running a 3-tier application on AWS with Amazon EKS.
 
-## AWS architecture
+## Production reference architectures
+
+Two simple, secure patterns for a **3-tier application** (web → app → database) on Kubernetes. Both use **Amazon EKS** for compute and **Amazon RDS PostgreSQL on Graviton (`db.t4g`)** for the database — the most cost-efficient managed relational option for a straightforward production workload.
+
+---
+
+### 1. Public application (internet-facing)
+
+For apps that **anyone on the internet** can access (customer portals, public APIs, SaaS products).
+
+![Public 3-tier production architecture](./docs/images/public-production-architecture.png)
+
+```mermaid
+flowchart TB
+    Users([Internet Users]) --> Route53[Route 53 + ACM]
+    Route53 --> WAF[AWS WAF]
+    WAF --> ALB[Internet-facing ALB<br/>Public subnets]
+    ALB --> EKS[Amazon EKS<br/>Private subnets]
+    EKS --> Web[Web tier pods]
+    EKS --> App[App tier pods]
+    App --> RDS[(RDS PostgreSQL<br/>db.t4g Multi-AZ<br/>Database subnets)]
+    EKS --> ECR[Amazon ECR]
+    EKS --> Secrets[Secrets Manager]
+    EKS --> NAT[NAT Gateway]
+    NAT --> Outbound([Outbound internet<br/>patches / APIs])
+
+    subgraph VPC["VPC — 2 Availability Zones"]
+        ALB
+        EKS
+        RDS
+    end
+```
+
+| Tier | AWS service | Notes |
+|------|-------------|-------|
+| Web | EKS pods + ALB | Frontend served through HTTPS |
+| App | EKS pods | Backend API; not exposed directly to the internet |
+| Database | RDS PostgreSQL (`db.t4g`) | Private subnets only; encrypted at rest |
+
+**Security essentials**
+
+- WAF in front of the ALB (OWASP managed rules)
+- TLS termination at the ALB with ACM
+- EKS nodes and RDS in **private subnets** — no public IPs on workloads
+- Security groups: ALB → EKS → RDS only (least privilege)
+- Secrets in Secrets Manager, not in container images
+- Single NAT Gateway per AZ (or one NAT to reduce cost in smaller deployments)
+
+---
+
+### 2. Internal application (company-only)
+
+For apps that **only employees** should reach (admin dashboards, internal tools, HR systems).
+
+![Internal 3-tier production architecture](./docs/images/internal-production-architecture.png)
+
+```mermaid
+flowchart TB
+    Employees([Company Employees]) --> VPN[AWS Client VPN<br/>or Site-to-Site VPN]
+    VPN --> InternalALB[Internal ALB<br/>Private subnets]
+    InternalALB --> EKS[Amazon EKS<br/>Private cluster endpoint]
+    EKS --> Web[Web tier pods]
+    EKS --> App[App tier pods]
+    App --> RDS[(RDS PostgreSQL<br/>db.t4g Multi-AZ<br/>Database subnets)]
+    EKS --> ECR[Amazon ECR]
+    EKS --> Secrets[Secrets Manager]
+    EKS --> Endpoints[VPC Endpoints<br/>AWS APIs]
+
+    subgraph VPC["VPC — no public ingress"]
+        InternalALB
+        EKS
+        RDS
+    end
+```
+
+| Tier | AWS service | Notes |
+|------|-------------|-------|
+| Web | EKS pods + internal ALB | Reachable only over VPN / corporate network |
+| App | EKS pods | Internal API tier |
+| Database | RDS PostgreSQL (`db.t4g`) | Isolated database subnets |
+
+**Security essentials**
+
+- **No** internet-facing load balancer or WAF — zero public entry point
+- EKS API endpoint private; access via VPN or AWS PrivateLink
+- Internal ALB restricted to corporate CIDR ranges via security groups
+- RDS not publicly accessible; security groups allow only the EKS node SG
+- VPC endpoints for ECR and Secrets Manager to avoid routing AWS API traffic over the public internet
+
+---
+
+### Public vs internal at a glance
+
+| | Public | Internal |
+|---|--------|----------|
+| Who can access | Anyone on the internet | Company members via VPN |
+| Entry point | Route 53 → WAF → public ALB | Client VPN → internal ALB |
+| EKS cluster | Private nodes, public ALB ingress | Private nodes, private API |
+| Database | RDS PostgreSQL `db.t4g` Multi-AZ | RDS PostgreSQL `db.t4g` Multi-AZ |
+| Outbound internet | NAT Gateway | VPC endpoints (preferred) |
+
+---
+
+## Implemented architecture (this repository)
+
+The Terraform in this repo implements an extended version of the **public** pattern (based on a multi-tier Azure reference), with separate web/app node groups, an internal ALB between tiers, and optional Helm/Karpenter add-ons.
 
 ![AWS infrastructure architecture](./docs/images/aws-architecture.png)
 
@@ -240,6 +345,10 @@ Edit `terraform/environments/dev/terraform.tfvars`:
 ## Cost notes
 
 This stack creates billable resources including NAT Gateway, EKS control plane, EC2 nodes, RDS, ALB, and WAF. Use `terraform destroy` in non-production environments when finished.
+
+## Optional: Karpenter autoscaling
+
+The default stack uses EKS managed node groups and the Cluster Autoscaler. For workload-driven autoscaling with Karpenter, see [`karpenter/README.md`](karpenter/README.md). That folder is fully optional and does not change the default Terraform or Helm deployment.
 
 ## License
 
